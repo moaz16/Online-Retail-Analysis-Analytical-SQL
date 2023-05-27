@@ -1,0 +1,156 @@
+1) First Query:
+
+--  first we will check the number of countries we covering:
+
+	SELECT count(distinct "Country") as "number of countries"
+
+    FROM public."Online_Retail";
+
+--  to find the appropriate countries to ignore, i decided to join the lowest 5 countries in total purchasing with the lowest 5 countries in total ordering .
+
+select p."Country", total_Purchases, row_number() over(order by p.total_purchases ) as "lowest purchasing country",
+
+        total_orders, row_number() over(order by total_orders ) as "lowest ordering country"
+
+From (	
+
+    (SELECT "Country", sum(purchase_price) as total_purchases
+
+    FROM public."Online_Retail"
+
+    group by "Country"
+
+    order by total_purchases
+
+    limit 5) p inner join 
+
+    (SELECT "Country", count( distinct "InvoiceNo") as total_orders
+
+    FROM public."Online_Retail"
+
+    group by "Country" 
+
+    order by total_orders
+
+    limit 5) s
+
+	on p."Country" = s."Country");
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+2) Second Query:
+-- after we get three countries that have been participated in both the last 5 countries in total purchasing and ordering and two of them are made only one order
+-- which is RSA and Brazil . the last one is saudi arabia which made 2 orders. 
+-- now let's be sure its also inactive by finding the time difference between the first and the last date the saudi-arabia made their orders.
+-- First i created a VIEW called lowest_countries_vu contain the first query to have the three countries. then calculate the time differance. 
+create or replace view lowest_countries_vu as (
+select p."Country", total_Purchases, row_number() over(order by p.total_purchases ) as "lowest purchasing country",
+        total_orders, row_number() over(order by total_orders ) as "lowest ordering country"
+From (	
+    (SELECT "Country", sum(purchase_price) as total_purchases
+    FROM public."Online_Retail"
+    group by "Country"
+    order by total_purchases
+    limit 5) p inner join 
+    (SELECT "Country", count( distinct "InvoiceNo") as total_orders
+    FROM public."Online_Retail"
+    group by "Country" 
+    order by total_orders
+    limit 5) s
+on p."Country" = s."Country"))
+
+-- then calculate the time differance.
+
+select distinct "Country", first_value("InvoiceDate") over(partition by "Country" order by "InvoiceDate" ) as forder_date,
+	first_value("InvoiceDate") over(partition by "Country" order by "InvoiceDate" desc) as lorder_date,
+	first_value("InvoiceDate") over(partition by "Country" order by "InvoiceDate" desc) -
+	first_value("InvoiceDate") over(partition by "Country" order by "InvoiceDate" ) as "time between first and last order"
+from public."Online_Retail"
+where "Country" is not null 
+and "Country" in (
+    select "Country" from lowest_countries_vu where "Country" = 'Saudi Arabia' )
+order by "time between first and last order";
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+3) Third Query:
+-- now we want to classify them to levels depending on the total purchasing they did ( the money we get). we don't have this information in our data set, 
+-- so I created a new column called price_purching which equal (  quantity * unit price ).
+
+	alter table "Online_Retail"
+	add column purchase_price numeric ;
+
+	update "Online_Retail"
+	set purchase_price = "Quantity" * "UnitPrice";
+
+-- we will classify them to 5 categories
+
+	select *, NTILE(5) over(order by total_purchases desc) as level
+	from (SELECT "Country", sum(purchase_price) as total_purchases
+	    FROM public."Online_Retail"
+            group by "Country" ) s;
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+4) Fourth Query:
+-- now we will focus only on the first level - we want to know the maimum, minimum deals or orders per day and the date for each value of them, 
+-- for every country in the first level to be always ready for any load
+
+select distinct "Country", 
+    first_value("orders per day") over (partition by "Country" order by "orders per day" desc) as "maximum orders per day",
+    first_value("orders per day") over (partition by "Country" order by "orders per day" ) as "minimum orders per day",
+    first_value("InvoiceDate") over (partition by "Country" order by "orders per day" desc) as "date of maximum orders per day",
+    first_value("InvoiceDate") over (partition by "Country" order by "orders per day" ) as "date of minimum orders per day"
+from 
+   (
+    select distinct ("Country"), "InvoiceDate", count("InvoiceNo") over (partition by "Country" order by "InvoiceDate"
+            range between interval '12' hour preceding and interval '12' hour following) as "orders per day"
+    from public."Online_Retail"
+    where "Country" in (
+        select x."Country"
+        from (
+              select s.*, NTILE(5) over(order by total_purchases desc) AS level
+              from (
+                   SELECT "Country", sum(purchase_price) as total_purchases
+                   FROM public."Online_Retail"
+                   group by "Country"
+                   ) s
+             ) x
+                   where x.level = 1)) v
+order by "maximum orders per day" desc ;
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+5) Fifth Query:
+-- after we knew the max and min number of orders, it's time to know the most stock that get orders from those first level countries to prepare it.
+
+select  distinct first_value("StockCode") over(order by total_orders DESC ) as "Most ordering stock"
+from (SELECT "Country","StockCode", count( distinct "InvoiceNo") as total_orders
+FROM public."Online_Retail"
+group by "Country","StockCode" ) s
+where "Country" in (
+        select x."Country"
+        from (
+              select s.*, NTILE(5) over(order by total_purchases desc) AS level
+              from (
+                   SELECT "Country", sum(purchase_price) as total_purchases
+                   FROM public."Online_Retail"
+                   group by "Country"
+                   ) s
+             ) x
+                   where x.level = 1);
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+6) Sixth Query:
+-- now we want to know the most 10 purchasing customers in the first level countries to give them a prize, and how percentage that every one of them 
+-- have a customers had a purchases more than him over the whole customers.
+
+select *, rank() over(order by total_purchases desc), percent_rank() over(order by total_purchases desc )
+from (SELECT  "Country", "CustomerID", sum(purchase_price) as total_purchases
+FROM public."Online_Retail"
+group by "Country","CustomerID" ) s
+where "Country" in (
+        select x."Country"
+        from (
+              select s.*, NTILE(5) over(order by total_purchases desc) AS level
+              from (
+                   SELECT "Country", sum(purchase_price) as total_purchases
+                   FROM public."Online_Retail"
+                   group by "Country"
+                   ) s
+             ) x
+                   where x.level = 1)
+limit 10;

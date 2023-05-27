@@ -1,0 +1,50 @@
+-- here is the answer ..
+
+select "CustomerID", recency, frequency, r_score, fm_score, 
+           case when (r_score = 5 and (fm_score in (5, 4)) or (r_score = 4 and fm_score = 5))
+                 THEN   'Champions'
+           when ((r_score in( 5 , 4) and fm_score = 2) or ((r_score in( 3, 4) and fm_score = 3)))
+                 THEN 'Potential loyalists'
+           when ((r_score = 5  and fm_score = 3) or (r_score = 4  and fm_score = 4) or (r_score = 3 and (fm_score in( 4 , 5))))
+                 THEN 'loyal Customers'
+           when (r_score = 5  and fm_score = 1) 
+                 THEN 'loyal Customers'
+           when ((r_score in( 4, 3))  and fm_score = 1) 
+                 THEN 'Promising'
+           when ((r_score in( 3, 2) and fm_score = 2) or (r_score = 2 and fm_score = 3))
+                 THEN 'Customers Needing Attention'
+           when ((r_score = 2 and (fm_score in( 5, 4))) or (r_score = 1 and fm_score = 3))
+                 THEN 'At Risk'
+           when (r_score = 1 and (fm_score in( 5, 4)))
+                 THEN 'Cant Lose Them'
+           when (r_score = 1  and fm_score = 2) 
+                 THEN 'Hibernating'
+           when (r_score = 1  and fm_score = 1) 
+                 THEN 'Lost'
+       END group_name
+
+from (
+Select "CustomerID", recency, frequency, monetary, ntile(5) over (order by s.recency) as r_score, ntile(5) over (order by (frequency+ monetary/2)) as fm_score
+from 
+(
+With rank_cte(cust_id, inv_date, rnk)
+as
+(
+    select distinct "CustomerID", "InvoiceDate",  
+            Dense_rank () over(partition by "CustomerID" order by "InvoiceDate" desc   ) AS "rank" 
+    FROM public."Online_Retail" 
+    order by "CustomerID" desc, "rank"
+)
+Select distinct tbl."CustomerID",
+       first_value(tbl."InvoiceDate") over(partition by tbl."CustomerID" order by tbl."InvoiceDate" desc   ) as refrence_date,
+       cte.inv_date as date_2 ,
+       first_value(tbl."InvoiceDate") over(partition by tbl."CustomerID" order by tbl."InvoiceDate" desc   ) - 
+       cte.inv_date as recency,
+       count(tbl."InvoiceNo") over (partition by tbl."CustomerID" ) as frequency,
+       sum(purchase_price) over (partition by tbl."CustomerID" ) as monetary
+from public."Online_Retail" tbl
+join rank_cte cte
+on tbl."CustomerID" = cte.cust_id and cte.rnk = 2
+order by tbl."CustomerID" desc
+) s
+) v
