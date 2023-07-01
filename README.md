@@ -1,4 +1,5 @@
-# Online-Retail-Analysis-Analytical-SQL
+# Project Description
+
 This project focuses on efficiently utilizing PostgreSQL to enhance data analysis and provide valuable insights for online retail businesses. 
 The primary objectives were to create tables, transform data, and meticulously clean online retail data. Additionally, the RFM (Recency, Frequency, Monetary) model was implemented using SQL analytical functions to enable precise customer segmentation and further enhance business insights.
 
